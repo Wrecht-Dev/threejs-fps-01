@@ -122,6 +122,7 @@ export function createBots(scene, world, random) {
       holdNode: 0,
       site: null,
       carrier: false,
+      fetchSpike: false, // B7: elected to recover a dropped spike
       visibleEnemy: null,
       lastSeen: null,
       lastSeenAt: -99,
@@ -135,7 +136,7 @@ export function createBots(scene, world, random) {
       blindedUntil: 0, // flash blindness: no thinking, moving or firing until then
       walkPhase: random() * 6,
       hearAt: -99,
-      stuckX: 0, stuckZ: 0, stuckTime: 0, detourUntil: 0, detourDir: 1,
+      stuckX: 0, stuckZ: 0, stuckTime: 0, detourUntil: 0, detourDir: 1, detourX: 0, detourZ: 0,
       hearPos: new THREE.Vector3(),
       mesh: group,
       torso,
@@ -168,6 +169,7 @@ export function createBots(scene, world, random) {
       bot.lastSeen = null;
       bot.burstLeft = 0;
       bot.carrier = false;
+      bot.fetchSpike = false;
       bot.mesh.visible = true;
       bot.mesh.rotation.set(0, 0, 0);
       bot.mesh.position.y = 0;
@@ -177,7 +179,7 @@ export function createBots(scene, world, random) {
         bot.yaw = 0;
         bot.site = sitePick;
         // Route: spawn -> lane -> site. Split the team across A-long, mid, B-long.
-        const lane = vi === 0 ? [4, 5, 6, 7, siteNode] : vi === 1 ? [3, 12, 13, 14, sitePick === 'A' ? 15 : 16, siteNode] : vi === 2 ? [8, 9, 10, 11, siteNode] : [3, 12, 13, 14, sitePick === 'A' ? 15 : 16, siteNode];
+        const lane = vi === 0 ? [4, 5, 6, 7, siteNode] : vi === 1 ? [3, 26, 28, 14, sitePick === 'A' ? 15 : 16, siteNode] : vi === 2 ? [8, 9, 10, 11, siteNode] : [3, 27, 29, 13, 14, sitePick === 'A' ? 15 : 16, siteNode];
         bot.route = lane;
         bot.routeIdx = 0;
         bot.state = 'route';
@@ -287,13 +289,21 @@ export function createBots(scene, world, random) {
       }
     }
     // B7: nearest alive Vanguard with no visible enemy fetches a dropped spike.
-    if (spike.state === 'dropped' && bot.team === 'vanguard' && !bot.visibleEnemy && !bot.carrier) {
-      let nearest = true;
-      for (const other of bots) {
-        if (other === bot || other.team !== 'vanguard' || !other.alive || other.visibleEnemy) continue;
-        if (Math.hypot(other.pos.x - spike.pos.x, other.pos.z - spike.pos.z) < Math.hypot(bot.pos.x - spike.pos.x, bot.pos.z - spike.pos.z)) { nearest = false; break; }
+    if (spike.state !== 'dropped') bot.fetchSpike = false;
+    if (spike.state === 'dropped' && bot.team === 'vanguard' && !bot.carrier) {
+      if (bot.visibleEnemy) {
+        bot.fetchSpike = false;
+      } else {
+        let nearest = true;
+        for (const other of bots) {
+          if (other === bot || other.team !== 'vanguard' || !other.alive || other.visibleEnemy) continue;
+          if (Math.hypot(other.pos.x - spike.pos.x, other.pos.z - spike.pos.z) < Math.hypot(bot.pos.x - spike.pos.x, bot.pos.z - spike.pos.z)) { nearest = false; break; }
+        }
+        // Route only on election: re-pathing every think tick would reset
+        // routeIdx and undo the final approach in step().
+        if (nearest && !bot.fetchSpike) { bot.state = 'route'; setRouteTo(bot, nearestNode(spike.pos.x, spike.pos.z)); }
+        bot.fetchSpike = nearest;
       }
-      if (nearest) { bot.state = 'route'; setRouteTo(bot, nearestNode(spike.pos.x, spike.pos.z)); }
     }
     // Heard a shot recently and idle: go look.
     if (bot.state === 'hold' && now - bot.hearAt < 2 && bot.team === 'warden') {
@@ -329,13 +339,26 @@ export function createBots(scene, world, random) {
         if (Math.hypot(bot.pos.x - bot.stuckX, bot.pos.z - bot.stuckZ) > 0.2) { bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckTime = 0; }
         else bot.stuckTime += dt;
         let tx = node.x; let tz = node.z;
-        if (bot.stuckTime > 1.5) {
-          if (now >= bot.detourUntil) { bot.detourUntil = now + 0.5; bot.detourDir = bot.detourDir * -1; setRouteTo(bot, bot.route[bot.route.length - 1]); bot.stuckTime = 0; }
+        // Sustained detour (B6 residual): when stuck, pick a sidestep anchor
+        // 2.5 m perpendicular to the route and keep walking to it for a full
+        // second (detourUntil), instead of sidestepping for a single step.
+        // No re-path here: BFS would return the same route that got stuck.
+        if (bot.stuckTime > 1.5 && now >= bot.detourUntil) {
+          bot.detourUntil = now + 1.0;
+          bot.detourDir = bot.detourDir * -1;
           const px = -(node.z - bot.pos.z); const pz = (node.x - bot.pos.x); const pl = Math.hypot(px, pz) || 1;
-          tx = bot.pos.x + (px / pl) * 2 * bot.detourDir; tz = bot.pos.z + (pz / pl) * 2 * bot.detourDir;
+          bot.detourX = bot.pos.x + (px / pl) * 2.5 * bot.detourDir;
+          bot.detourZ = bot.pos.z + (pz / pl) * 2.5 * bot.detourDir;
+          bot.stuckTime = 0;
         }
+        if (now < bot.detourUntil) { tx = bot.detourX; tz = bot.detourZ; }
         const arrived = moveToward(bot, tx, tz, dt, bot.speed);
         if (arrived && tx === node.x && tz === node.z) bot.routeIdx += 1;
+      } else if (bot.fetchSpike && api.spike.state === 'dropped') {
+        // B7 final approach: the spike's nearest node can sit metres from the
+        // spike itself, outside the 1.2 m pickup radius — walk the last leg
+        // directly onto the spike or the fetch never completes.
+        moveToward(bot, api.spike.pos.x, api.spike.pos.z, dt, bot.speed);
       } else {
         bot.state = bot.team === 'warden' ? 'hold' : 'route';
         if (bot.team === 'warden') bot.holdNode = nearestNode(bot.pos.x, bot.pos.z);

@@ -25,7 +25,7 @@ export const WAYPOINTS = [
   { x: 20, z: -6 }, // 10
   { x: 17, z: -11 }, // 11 B approach
   // Mid
-  { x: 0, z: 2 }, // 12
+  { x: 0, z: 3.4 }, // 12 (moved north of the Crusher face; was (0,2), inside its footprint)
   { x: 2, z: -6 }, // 13 (shifted off the Crusher pillar line, B6)
   { x: 0, z: -11 }, // 14 mid connector
   { x: -9, z: -12 }, // 15 mid to A
@@ -40,15 +40,24 @@ export const WAYPOINTS = [
   { x: 6, z: -15 }, // 23 W spawn east
   { x: -20, z: -15 }, // 24 A corner
   { x: 20, z: -15 }, // 25 B corner
+  // Mid low-wall flanks and Crusher flanks (B6 residual): the direct [3,12]
+  // edge crossed the low wall at (0, 6.5) and node 12 sat in the Crusher, so
+  // BFS now routes around both obstacles by construction.
+  { x: -4.2, z: 6.5 }, // 26 west of the mid low wall
+  { x: 4.2, z: 6.5 }, // 27 east of the mid low wall
+  { x: -3.6, z: 0.5 }, // 28 west of the Crusher
+  { x: 3.6, z: 0.5 }, // 29 east of the Crusher
 ];
 export const EDGES = [
-  [0, 1], [0, 2], [0, 3], [1, 4], [2, 8], [3, 12],
+  [0, 1], [0, 2], [0, 3], [1, 4], [2, 8],
   [4, 5], [5, 6], [6, 7], [7, 17], [7, 15], [7, 24],
   [8, 9], [9, 10], [10, 11], [11, 18], [11, 16], [11, 25],
-  [12, 13], [13, 14], [14, 15], [14, 16], [15, 19], [16, 20],
+  [13, 14], [14, 15], [14, 16], [15, 19], [16, 20],
   [15, 17], [16, 18], [17, 19], [18, 20], [17, 22], [18, 23],
   [19, 22], [20, 23], [21, 22], [21, 23], [14, 21], [19, 24], [20, 25],
-  [12, 5], [12, 9], [1, 3], [2, 3],
+  [1, 3], [2, 3],
+  [3, 26], [3, 27], [26, 12], [27, 12], [26, 28], [27, 29],
+  [28, 14], [29, 14], [29, 13], [28, 15], [29, 16],
 ];
 
 export const SITES = {
